@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf--8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prova</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --paper: #0f172a;
+      --ink: #e5e7eb;
+      --muted: #9ca3af;
+      --line: #22304a;
+      --accent: #06b6d4;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Arial;
+    }
+    .container { max-width: 960px; margin: 0 auto; padding: 16px; }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+      position: relative;
+    }
+    .hidden { display: none !important; }
+    h1, h2 { margin: 0 0 8px; }
+    p { color: var(--muted); margin: 8px 0; }
+    label { display: block; margin: 8px 0 6px; font-weight: 600; }
+    input {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #0a1222;
+      color: #e5e7eb;
+      outline: none;
+      font-size: 16px;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      padding: 16px 20px;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #001419;
+      font-weight: 700;
+      font-size: 17px;
+      touch-action: manipulation;
+    }
+    #timer {
+      font-size: 16px;
+      font-weight: 700;
+      margin-left: auto;
+      background: #091026;
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 10px;
+    }
+    #exam-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    #examFrame { width: 100%; height: 2160px; border: 0; display: block; }
+    form { margin: 0; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card" id="setup">
+      <h1>Prova</h1>
+      <p>Você terá 60 minutos para concluir a avaliação.</p>
+      <form id="startForm" novalidate>
+        <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
+          <button type="submit" id="startBtn" aria-label="Iniciar prova">Iniciar Prova</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card hidden" id="exam">
+      <div id="exam-header">
+        <h2>Prova em andamento</h2>
+        <div id="timer" aria-live="polite">Tempo Restante: 60:00</div>
+      </div>
+      <iframe
+        id="examFrame"
+        src="https://docs.google.com/forms/d/e/1FAIpQLSc4R0dSTo-hU9RtrrPPFI8gBfq-3VzYTrS9c5rClqPfvWv98Q/viewform?embedded=true"
+        loading="lazy"
+        referrerpolicy="no-referrer-when-downgrade"
+      >Carregando…</iframe>
+    </div>
+
+    <div class="card hidden" id="done">
+      <h1 style="text-align:center">Tentativa Encerrada</h1>
+      <p style="text-align:center" id="reason">O tempo para realizar a prova terminou.</p>
+    </div>
+  </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const TOTAL_MINUTES = 60;
+  const form = document.getElementById('startForm');
+  const setup = document.getElementById('setup');
+  const exam = document.getElementById('exam');
+  const done = document.getElementById('done');
+  const timerEl = document.getElementById('timer');
+
+  let started = false;
+  let closed = false;
+  let timerId = null;
+  let wakeLock = null;
+
+  // Mantém a tela ativa durante a prova
+  async function requestWakeLock() {
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    } catch (e) {
+      console.log('Wake Lock não suportado ou negado.');
+    }
+  }
+
+  function releaseWakeLock() {
+    try {
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+    } catch (e) {}
+  }
+
+  // Formata o tempo para o formato MM:SS
+  function formatTime(s) {
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return (m < 10 ? '0' + m : m) + ':' + (r < 10 ? '0' + r : r);
+  }
+
+  // Inicia o contador
+  function startTimer(totalSeconds) {
+    let t = totalSeconds;
+    timerEl.textContent = 'Tempo Restante: ' + formatTime(t);
+    timerId = setInterval(() => {
+      t -= 1;
+      timerEl.textContent = 'Tempo Restante: ' + formatTime(t);
+      if (t <= 0) {
+        clearInterval(timerId);
+        endAttempt('O tempo para realizar a prova terminou.');
+      }
+    }, 1000);
+  }
+
+  // Finaliza a tentativa
+  function endAttempt(reason) {
+    if (closed) return;
+    closed = true;
+    started = false;
+    clearInterval(timerId);
+    releaseWakeLock();
+    exam.classList.add('hidden');
+    done.classList.remove('hidden');
+    document.getElementById('reason').textContent = reason || 'Tentativa encerrada.';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Inicia a prova
+  function startExam() {
+    if (started) return;
+    started = true;
+    
+    setup.classList.add('hidden');
+    exam.classList.remove('hidden');
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: exam.offsetTop - 8, behavior: 'smooth' });
+    });
+
+    requestWakeLock();
+    startTimer(TOTAL_MINUTES * 60);
+  }
+
+  // Evento para iniciar a prova
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    startExam();
+  });
+
+  // Confirmação para evitar fechar a aba acidentalmente
+  window.addEventListener('beforeunload', function(e) {
+    if (started && !closed) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+});
+</script>
+
+</body>
+</html>
